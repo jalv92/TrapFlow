@@ -8,6 +8,8 @@ using System.Linq;
 
 namespace NinjaTrader.NinjaScript.Indicators
 {
+    public enum StructureVerdict { ValueUp, ValueDown, Lateral }
+
     public class VolumeProfile
     {
         private readonly SortedDictionary<double, long> rows = new SortedDictionary<double, long>();
@@ -48,6 +50,23 @@ namespace NinjaTrader.NinjaScript.Indicators
             }
             Val = prices[lo];
             Vah = prices[hi];
+        }
+    }
+
+    public static partial class TrapMath
+    {
+        // Arrays oldest -> newest; only the last 3 sessions are inspected.
+        // Value-up: POC and VAL strictly rising across both comparisons.
+        // Value-down: POC and VAH strictly falling. Anything else: lateral.
+        public static StructureVerdict GetStructure(double[] pocs, double[] vahs, double[] vals)
+        {
+            int n = pocs.Length;
+            if (n < 3) return StructureVerdict.Lateral;
+            bool up = pocs[n - 1] > pocs[n - 2] && pocs[n - 2] > pocs[n - 3]
+                   && vals[n - 1] > vals[n - 2] && vals[n - 2] > vals[n - 3];
+            bool down = pocs[n - 1] < pocs[n - 2] && pocs[n - 2] < pocs[n - 3]
+                     && vahs[n - 1] < vahs[n - 2] && vahs[n - 2] < vahs[n - 3];
+            return up ? StructureVerdict.ValueUp : down ? StructureVerdict.ValueDown : StructureVerdict.Lateral;
         }
     }
 }
