@@ -98,6 +98,120 @@ namespace NinjaTrader.NinjaScript.Indicators
         public bool CloseBeyond886(double close) { return IsLong ? close < P886 : close > P886; }
     }
 
+    public enum TfState { Dormant, ZoneBuilt, Armed, AbsorptionSeen }
+    public enum TfEventType { None, ZoneBuilt, PreAlert, Signal, ZoneInvalidated }
+
+    public class TfSignal
+    {
+        public TfEventType Type = TfEventType.None;
+        public double Entry, Stop, Target1;
+        public double Zone705, Zone788, Zone886;
+        public CandleLadder AbsorptionCandle, SignalCandle;
+    }
+
+    public class TrapFlowEngine
+    {
+        public long VolumeThreshold = 20000;
+        public double AbsorptionDeltaPct = 0.15;
+        public double ImbalanceRatio = 4.0;
+        public int ImbalanceMinLevels = 2;
+        public int SignalWindowBars = 3;
+        public double TickSize = 0.25;
+
+        public TfState State { get; private set; }
+        public StructureVerdict Structure { get; private set; }
+        public TrapZone Zone { get; private set; }
+
+        private CandleLadder absorption;
+        private CandleLadder prev;
+        private int absorptionAge;
+        private bool IsLong { get { return Structure == StructureVerdict.ValueUp; } }
+
+        public void SetStructure(StructureVerdict v)
+        {
+            Structure = v;
+            Zone = null; absorption = null; prev = null;
+            State = TfState.Dormant;
+        }
+
+        public TfEventType OnSwingLeg(double swingLow, double swingHigh, double val, double vah)
+        {
+            if (Structure == StructureVerdict.Lateral) return TfEventType.None;
+            var z = TrapZone.Build(swingLow, swingHigh, IsLong);
+            if (!z.IsOutsideValue(val, vah)) return TfEventType.None;
+            Zone = z; absorption = null;
+            State = TfState.ZoneBuilt;
+            return TfEventType.ZoneBuilt;
+        }
+
+        public TfSignal OnCandleClose(CandleLadder c, bool inWindow)
+        {
+            var result = new TfSignal();
+            var p = prev; prev = c;
+            if (Zone == null) return result;
+
+            // 1. Hard invalidation first — fires regardless of window/volume filters.
+            if (Zone.CloseBeyond886(c.Close))
+            {
+                Zone = null; absorption = null; State = TfState.Dormant;
+                result.Type = TfEventType.ZoneInvalidated;
+                return result;
+            }
+
+            // 2. Hard filters: nothing else advances outside the window or under the volume floor.
+            if (!inWindow || c.TotalVolume < VolumeThreshold) return result;
+
+            if (State == TfState.ZoneBuilt && Zone.Intersects(c.Low, c.High))
+                State = TfState.Armed;
+
+            if (State == TfState.Armed)
+            {
+                if (TrapMath.IsAbsorption(c, null, IsLong, AbsorptionDeltaPct))
+                {
+                    absorption = c; absorptionAge = 0;
+                    State = TfState.AbsorptionSeen;
+                    result.Type = TfEventType.PreAlert;
+                    return result;
+                }
+                if (TrapMath.IsAbsorption(p, c, IsLong, AbsorptionDeltaPct))
+                {
+                    // Absorption confirmed by this candle's flip; this candle is age 1
+                    // and may itself be the signal candle.
+                    absorption = p; absorptionAge = 1;
+                    State = TfState.AbsorptionSeen;
+                    return TrySignal(c, result);
+                }
+                return result;
+            }
+
+            if (State == TfState.AbsorptionSeen)
+            {
+                absorptionAge++;
+                if (absorptionAge > SignalWindowBars)
+                {
+                    absorption = null; State = TfState.Armed;
+                    return result;
+                }
+                return TrySignal(c, result);
+            }
+            return result;
+        }
+
+        private TfSignal TrySignal(CandleLadder c, TfSignal result)
+        {
+            if (!TrapMath.IsSignal(c, absorption, IsLong, ImbalanceRatio, ImbalanceMinLevels, TickSize))
+                return result;
+            result.Type = TfEventType.Signal;
+            result.Entry = c.Close;
+            result.Stop = IsLong ? c.Low - TickSize : c.High + TickSize;
+            result.Target1 = IsLong ? Zone.AnchorHigh : Zone.AnchorLow;
+            result.Zone705 = Zone.P705; result.Zone788 = Zone.P788; result.Zone886 = Zone.P886;
+            result.AbsorptionCandle = absorption; result.SignalCandle = c;
+            Zone = null; absorption = null; State = TfState.Dormant; // one signal per zone
+            return result;
+        }
+    }
+
     public static partial class TrapMath
     {
         // Arrays oldest -> newest; only the last 3 sessions are inspected.
