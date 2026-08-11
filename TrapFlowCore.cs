@@ -10,6 +10,19 @@ namespace NinjaTrader.NinjaScript.Indicators
 {
     public enum StructureVerdict { ValueUp, ValueDown, Lateral }
 
+    public class LadderRow { public long Bid; public long Ask; }
+
+    public class CandleLadder
+    {
+        public double Open, High, Low, Close;
+        public long TotalVolume;
+        public long Delta;   // ask-initiated minus bid-initiated volume
+        public double Poc;   // price row with max combined volume
+        public SortedDictionary<double, LadderRow> Rows = new SortedDictionary<double, LadderRow>();
+        public double Range { get { return High - Low; } }
+        public bool ClosedBullish { get { return Close > Open; } }
+    }
+
     public class VolumeProfile
     {
         private readonly SortedDictionary<double, long> rows = new SortedDictionary<double, long>();
@@ -99,6 +112,31 @@ namespace NinjaTrader.NinjaScript.Indicators
             bool down = pocs[n - 1] < pocs[n - 2] && pocs[n - 2] < pocs[n - 3]
                      && vahs[n - 1] < vahs[n - 2] && vahs[n - 2] < vahs[n - 3];
             return up ? StructureVerdict.ValueUp : down ? StructureVerdict.ValueDown : StructureVerdict.Lateral;
+        }
+
+        // Long absorption: aggressive sellers concentrated at the low with no result.
+        // delta strongly negative, candle POC in the lower third, and price recovers
+        // (close in upper half of the range, or the next candle closes bullish).
+        // Short is the exact mirror.
+        public static bool IsAbsorption(CandleLadder c, CandleLadder next, bool isLong, double deltaPct)
+        {
+            if (c == null || c.TotalVolume <= 0 || c.Range <= 0) return false;
+            if (isLong)
+            {
+                bool deltaOk = c.Delta < 0 && Math.Abs(c.Delta) >= deltaPct * c.TotalVolume;
+                bool atExtreme = c.Poc <= c.Low + c.Range / 3.0;
+                bool recovered = c.Close >= c.Low + c.Range / 2.0
+                              || (next != null && next.ClosedBullish);
+                return deltaOk && atExtreme && recovered;
+            }
+            else
+            {
+                bool deltaOk = c.Delta > 0 && c.Delta >= deltaPct * c.TotalVolume;
+                bool atExtreme = c.Poc >= c.High - c.Range / 3.0;
+                bool recovered = c.Close <= c.High - c.Range / 2.0
+                              || (next != null && next.Close < next.Open);
+                return deltaOk && atExtreme && recovered;
+            }
         }
     }
 }
