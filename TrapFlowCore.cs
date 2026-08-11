@@ -138,5 +138,53 @@ namespace NinjaTrader.NinjaScript.Indicators
                 return deltaOk && atExtreme && recovered;
             }
         }
+
+        // Diagonal footprint imbalance (industry convention).
+        // Long: buy imbalance at price p when ask(p) >= ratio * max(bid(p - tick), 1),
+        //   counted only in the lower third of the candle.
+        // Short: sell imbalance at p when bid(p) >= ratio * max(ask(p + tick), 1),
+        //   counted only in the upper third.
+        public static int CountImbalances(CandleLadder c, bool isLong, double ratio, double tickSize)
+        {
+            if (c == null || c.Range <= 0) return 0;
+            int count = 0;
+            foreach (var kv in c.Rows)
+            {
+                double p = kv.Key;
+                LadderRow neighbor;
+                if (isLong)
+                {
+                    if (p > c.Low + c.Range / 3.0) continue;
+                    if (!c.Rows.TryGetValue(Math.Round(p - tickSize, 10), out neighbor)) continue;
+                    if (kv.Value.Ask >= ratio * Math.Max(neighbor.Bid, 1)) count++;
+                }
+                else
+                {
+                    if (p < c.High - c.Range / 3.0) continue;
+                    if (!c.Rows.TryGetValue(Math.Round(p + tickSize, 10), out neighbor)) continue;
+                    if (kv.Value.Bid >= ratio * Math.Max(neighbor.Ask, 1)) count++;
+                }
+            }
+            return count;
+        }
+
+        // Second failure: sellers attack again but fail HIGHER than the absorption low
+        // (mirror for shorts), the candle flips, and aggressive buyers light up the ladder.
+        public static bool IsSignal(CandleLadder sig, CandleLadder absorption, bool isLong,
+                                    double ratio, int minLevels, double tickSize)
+        {
+            if (sig == null || absorption == null) return false;
+            if (isLong)
+            {
+                if (sig.Low <= absorption.Low) return false;
+                if (!sig.ClosedBullish) return false;
+            }
+            else
+            {
+                if (sig.High >= absorption.High) return false;
+                if (!(sig.Close < sig.Open)) return false;
+            }
+            return CountImbalances(sig, isLong, ratio, tickSize) >= minLevels;
+        }
     }
 }
