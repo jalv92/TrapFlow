@@ -53,6 +53,38 @@ namespace NinjaTrader.NinjaScript.Indicators
         }
     }
 
+    public class TrapZone
+    {
+        public bool IsLong;
+        public double P705, P788, P886, AnchorLow, AnchorHigh;
+        public double UpperEdge { get { return IsLong ? P705 : P886; } }
+        public double LowerEdge { get { return IsLong ? P886 : P705; } }
+
+        public static TrapZone Build(double swingLow, double swingHigh, bool isLong)
+        {
+            double range = swingHigh - swingLow;
+            var z = new TrapZone { IsLong = isLong, AnchorLow = swingLow, AnchorHigh = swingHigh };
+            if (isLong)
+            {
+                z.P705 = swingHigh - 0.705 * range;
+                z.P788 = swingHigh - 0.788 * range;
+                z.P886 = swingHigh - 0.886 * range;
+            }
+            else
+            {
+                z.P705 = swingLow + 0.705 * range;
+                z.P788 = swingLow + 0.788 * range;
+                z.P886 = swingLow + 0.886 * range;
+            }
+            return z;
+        }
+
+        // Spec: the whole zone must sit outside value — gate on the shallow edge (0.705).
+        public bool IsOutsideValue(double val, double vah) { return IsLong ? P705 < val : P705 > vah; }
+        public bool Intersects(double lo, double hi) { return lo <= UpperEdge && hi >= LowerEdge; }
+        public bool CloseBeyond886(double close) { return IsLong ? close < P886 : close > P886; }
+    }
+
     public static partial class TrapMath
     {
         // Arrays oldest -> newest; only the last 3 sessions are inspected.
