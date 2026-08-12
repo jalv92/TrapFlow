@@ -99,22 +99,32 @@ public class EngineTests
     }
 
     [Fact]
-    public void LowVolumeCandle_DoesNotSeedFlipConfirmation()
+    public void UngatedAbsorption_CannotFlipConfirm_BreaksAdjacency()
     {
         var e = LongEngine();
-        // Low-volume candle that fails volume gate — should NOT be stored as prev.
-        var thin = Mk.Candle(o: 129, h: 130, l: 120, c: 121, totalVol: 5000, delta: -750, poc: 121);
+        // Arm zone with a fully gated, non-absorption candle that intersects [111.4, 129.5]
+        var dull = Mk.Candle(126, 128, 124, 125, 25000, 100, 126);
+        Assert.Equal(TfEventType.None, e.OnCandleClose(dull, true).Type);
+        Assert.Equal(TfState.Armed, e.State);
+
+        // Thin candle: has absorption signature (delta -30%, POC at low, no own recovery)
+        // but FAILS volume gate (5000 < 20000 threshold).
+        // This candle WOULD satisfy IsAbsorption(thin, null) if gated:
+        // - deltaOk: 1500 >= 0.15 * 5000 = 750? YES
+        // - atExtreme: 121 <= 120 + 3.33? YES
+        // - recovered: 121 >= 125? NO (but next.ClosedBullish would recover it)
+        // Since prev is null'd on gate fail, flip-confirmation can't happen.
+        var thin = Mk.Candle(o: 129, h: 130, l: 120, c: 121, totalVol: 5000, delta: -1500, poc: 121);
         var result1 = e.OnCandleClose(thin, true);
         Assert.Equal(TfEventType.None, result1.Type);
-        Assert.Equal(TfState.ZoneBuilt, e.State);  // Zone not yet armed (thin didn't pass gate)
+        Assert.Equal(TfState.Armed, e.State);
 
-        // Now send a fully qualifying absorption candle + signal conditions.
-        // If the thin candle had been stored as prev, its flip would trigger.
-        // Since prev was nulled on gate failure, no flip confirmation occurs.
-        var fullAbs = Mk.Candle(o: 129, h: 130, l: 120, c: 126, totalVol: 30000, delta: -6000, poc: 121);
-        var result2 = e.OnCandleClose(fullAbs, true);
-        // fullAbs itself is absorbed (high delta, close recovery) → PreAlert
-        Assert.Equal(TfEventType.PreAlert, result2.Type);
-        Assert.Equal(TfState.AbsorptionSeen, e.State);
+        // Sig candle: bullish close, but positive delta — does NOT satisfy IsAbsorption(c, null).
+        // PRE-FIX: thin would be stored as prev; flip-confirmation fires, absorption is confirmed,
+        //          and Sig fires Signal → BUG.
+        // POST-FIX: thin is not stored (prev is null); Sig cannot flip-confirm, stays Armed.
+        var result2 = e.OnCandleClose(Sig(), true);
+        Assert.Equal(TfEventType.None, result2.Type);
+        Assert.Equal(TfState.Armed, e.State);
     }
 }
