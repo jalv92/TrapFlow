@@ -179,7 +179,13 @@ namespace NinjaTrader.NinjaScript.Indicators
                 lastSwingHighBar = -1; lastSwingLowBar = -1;
 
                 activeZone = null;
+                // ponytail: counters reset per-load but old draw-object tags don't disappear
+                // on their own -- wipe the chart once here instead. No within-run pruning of
+                // the tag counters themselves: zones/signals are scarce by design (0-2
+                // signals/day, a handful of zones/day), so unbounded growth within a single
+                // load is accepted for v1.
                 zoneCounter = 0; signalCounter = 0; preAlertCounter = 0;
+                RemoveDrawObjects();
             }
         }
 
@@ -205,7 +211,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             // extension; every other outcome (including Signal, which still wants the box
             // to reach the signal bar before it freezes) extends the box as usual.
             if (evt.Type == TfEventType.ZoneInvalidated)
-                RenderZoneInvalidated();
+                FreezeActiveZoneGray();
             else
                 ExtendActiveZone();
 
@@ -380,6 +386,12 @@ namespace NinjaTrader.NinjaScript.Indicators
         // engine.Zone still reflects the just-built zone.
         private void RenderZoneBuilt()
         {
+            // Core's OnSwingLeg overwrites Zone unconditionally on any new valid swing leg
+            // -- no invalidation event fires for whatever zone this one replaces. Without
+            // this, the old box would stay green/red on the chart forever, looking live
+            // when it's actually dead.
+            FreezeActiveZoneGray();
+
             var z = engine.Zone;
             zoneCounter++;
             DateTime now = Times[1][0];
@@ -407,8 +419,9 @@ namespace NinjaTrader.NinjaScript.Indicators
         }
 
         // One-shot gray redraw, then stop tracking it -- the box freezes at this bar
-        // instead of continuing to extend right.
-        private void RenderZoneInvalidated()
+        // instead of continuing to extend right. Shared by the explicit ZoneInvalidated
+        // event and by RenderZoneBuilt (a silent zone replacement, no explicit event).
+        private void FreezeActiveZoneGray()
         {
             if (activeZone == null) return;
             Draw.Rectangle(this, activeZone.Tag, false, activeZone.CreatedTime, activeZone.Upper,
