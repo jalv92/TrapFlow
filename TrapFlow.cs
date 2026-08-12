@@ -475,7 +475,7 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (State == State.Realtime)
             {
                 PlaySound(NinjaTrader.Core.Globals.InstallDir + @"\sounds\Alert1.wav");
-                AppendSignalToCsv(t0, isLong, target2, sig);
+                AppendSignalToCsv(ToEt(t0), isLong, target2, sig);
             }
         }
 
