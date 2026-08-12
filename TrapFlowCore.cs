@@ -147,19 +147,23 @@ namespace NinjaTrader.NinjaScript.Indicators
         public TfSignal OnCandleClose(CandleLadder c, bool inWindow)
         {
             var result = new TfSignal();
-            var p = prev; prev = c;
-            if (Zone == null) return result;
+            var p = prev;
+            if (Zone == null) { prev = null; return result; }
 
             // 1. Hard invalidation first — fires regardless of window/volume filters.
             if (Zone.CloseBeyond886(c.Close))
             {
                 Zone = null; absorption = null; State = TfState.Dormant;
                 result.Type = TfEventType.ZoneInvalidated;
+                prev = null;
                 return result;
             }
 
             // 2. Hard filters: nothing else advances outside the window or under the volume floor.
-            if (!inWindow || c.TotalVolume < VolumeThreshold) return result;
+            if (!inWindow || c.TotalVolume < VolumeThreshold) { prev = null; return result; }
+
+            // Only store gated candles as prev for flip-confirmation adjacency.
+            prev = c;
 
             if (State == TfState.ZoneBuilt && Zone.Intersects(c.Low, c.High))
                 State = TfState.Armed;

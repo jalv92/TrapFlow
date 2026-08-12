@@ -97,4 +97,24 @@ public class EngineTests
         var r = e.OnCandleClose(Sig(), true);
         Assert.Equal(TfEventType.Signal, r.Type);
     }
+
+    [Fact]
+    public void LowVolumeCandle_DoesNotSeedFlipConfirmation()
+    {
+        var e = LongEngine();
+        // Low-volume candle that fails volume gate — should NOT be stored as prev.
+        var thin = Mk.Candle(o: 129, h: 130, l: 120, c: 121, totalVol: 5000, delta: -750, poc: 121);
+        var result1 = e.OnCandleClose(thin, true);
+        Assert.Equal(TfEventType.None, result1.Type);
+        Assert.Equal(TfState.ZoneBuilt, e.State);  // Zone not yet armed (thin didn't pass gate)
+
+        // Now send a fully qualifying absorption candle + signal conditions.
+        // If the thin candle had been stored as prev, its flip would trigger.
+        // Since prev was nulled on gate failure, no flip confirmation occurs.
+        var fullAbs = Mk.Candle(o: 129, h: 130, l: 120, c: 126, totalVol: 30000, delta: -6000, poc: 121);
+        var result2 = e.OnCandleClose(fullAbs, true);
+        // fullAbs itself is absorbed (high delta, close recovery) → PreAlert
+        Assert.Equal(TfEventType.PreAlert, result2.Type);
+        Assert.Equal(TfState.AbsorptionSeen, e.State);
+    }
 }
