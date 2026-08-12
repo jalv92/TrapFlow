@@ -170,7 +170,13 @@ namespace NinjaTrader.NinjaScript.Indicators
                 currentRth = new VolumeProfile();
                 rthHistory.Clear();
 
-                swing = Swing(Closes[1], SwingStrength);
+                // F4: real bar extremes, not closes -- Swing(ISeries<double> input, strength)
+                // uses the passed series' own values for BOTH swing-high and swing-low
+                // detection, which made every fib level / outside-value check / Target1
+                // systematically shallow when fed Closes[1]. Swing(Bars, strength) targets
+                // BarsArray[1] (the volumetric series) while still resolving to that Bars'
+                // real High/Low, matching the parameterless overload's default behavior.
+                swing = Swing(BarsArray[1], SwingStrength);
 
                 currentEthDate = DateTime.MinValue;
                 currentRthRollDate = DateTime.MinValue;
@@ -301,12 +307,29 @@ namespace NinjaTrader.NinjaScript.Indicators
                     var vahs = rthHistory.Select(h => h[1]).ToArray();
                     var vals = rthHistory.Select(h => h[2]).ToArray();
                     var verdict = TrapMath.GetStructure(pocs, vahs, vals);
+                    // F2: freeze the outgoing zone box before SetStructure nulls engine.Zone --
+                    // otherwise ExtendActiveZone() keeps stretching a dead box across a
+                    // structure reset (e.g. into a Lateral day).
+                    FreezeActiveZoneGray();
                     engine.SetStructure(verdict);
                     Print(string.Format("{0} {1:yyyy-MM-dd} structure: {2} ({3} RTH sessions)",
                         Name, et, verdict, rthHistory.Count));
+
+                    // F3: feed the already-confirmed most recent swing leg immediately so the
+                    // first zone of a newly-directional structure doesn't wait >=25 min for a
+                    // brand-new swing confirmation. Same ordering + degenerate-leg guards as
+                    // TrackSwings/FeedSwingLeg (low must precede high for a long leg, high must
+                    // precede low for a short leg).
+                    if (verdict == StructureVerdict.ValueUp
+                        && lastSwingLowBar >= 0 && lastSwingHighBar >= 0 && lastSwingLowBar < lastSwingHighBar)
+                        FeedSwingLeg(lastSwingLow, lastSwingHigh);
+                    else if (verdict == StructureVerdict.ValueDown
+                        && lastSwingHighBar >= 0 && lastSwingLowBar >= 0 && lastSwingHighBar < lastSwingLowBar)
+                        FeedSwingLeg(lastSwingLow, lastSwingHigh);
                 }
                 else
                 {
+                    FreezeActiveZoneGray();
                     engine.SetStructure(StructureVerdict.Lateral);
                     Print(string.Format("{0} {1:yyyy-MM-dd} structure: insufficient RTH history ({2}/3) - dormant",
                         Name, et, rthHistory.Count));

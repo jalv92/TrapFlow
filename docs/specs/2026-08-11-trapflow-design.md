@@ -30,6 +30,7 @@ Volume profiles of the last 3 completed RTH sessions.
 **2. ZONE**
 Most recent completed swing leg in the structure direction (NT8 `Swing`, strength parameterized): swing low → swing high for longs. Fib retracement levels **0.705 / 0.788 / 0.886** drawn as a box (the trap zone: 0.705 to 0.886).
 Validity: the whole zone must sit **outside the value area** — for longs, the 0.705 price must be **below the VAL** of the *developing current-day ETH profile* (session template: ETH starting 18:00 ET prior day). A zone inside value is not drawn.
+Swing anchors are bar highs/lows of the volumetric series (not closes).
 
 **3. ARMED**
 Price trades inside the zone, AND time is within **09:30–11:00 ET**, AND current 5-min candle volume **≥ 20,000 contracts**. Both filters are hard: outside the window or below the threshold, no state advances.

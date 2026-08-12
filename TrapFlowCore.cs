@@ -170,20 +170,30 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             if (State == TfState.Armed)
             {
-                if (TrapMath.IsAbsorption(c, null, IsLong, AbsorptionDeltaPct))
+                // F1: absorption candidate must trade inside the zone (spec phase 4: "a
+                // 5-min candle INSIDE THE ZONE"). Own-recovery candidate is c; flip-confirm
+                // candidate is p. The eventual SIGNAL candle (c on the flip path) stays
+                // ungated per spec — it is not required to be inside the zone.
+                if (Zone.Intersects(c.Low, c.High)
+                    && TrapMath.IsAbsorption(c, null, IsLong, AbsorptionDeltaPct))
                 {
                     absorption = c; absorptionAge = 0;
                     State = TfState.AbsorptionSeen;
                     result.Type = TfEventType.PreAlert;
                     return result;
                 }
-                if (TrapMath.IsAbsorption(p, c, IsLong, AbsorptionDeltaPct))
+                if (p != null && Zone.Intersects(p.Low, p.High)
+                    && TrapMath.IsAbsorption(p, c, IsLong, AbsorptionDeltaPct))
                 {
                     // Absorption confirmed by this candle's flip; this candle is age 1
-                    // and may itself be the signal candle.
+                    // and may itself be the signal candle. F5: if it isn't, still surface
+                    // the AbsorptionSeen transition as a PreAlert instead of a silent None.
                     absorption = p; absorptionAge = 1;
                     State = TfState.AbsorptionSeen;
-                    return TrySignal(c, result);
+                    var flipResult = TrySignal(c, result);
+                    if (flipResult.Type != TfEventType.Signal)
+                        flipResult.Type = TfEventType.PreAlert;
+                    return flipResult;
                 }
                 return result;
             }
