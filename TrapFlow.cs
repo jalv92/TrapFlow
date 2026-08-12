@@ -464,12 +464,32 @@ namespace NinjaTrader.NinjaScript.Indicators
             double poc = developingEth.Poc;
             double lo = Math.Min(sig.Entry, sig.Target1);
             double hi = Math.Max(sig.Entry, sig.Target1);
+            double? target2 = null;
             if (poc > lo && poc < hi)
+            {
+                target2 = poc;
                 Draw.Line(this, "tfTarget2" + signalCounter, false, t0, poc, t1, poc,
                     Brushes.Gold, DashStyleHelper.Dash, 2);
+            }
 
             if (State == State.Realtime)
+            {
                 PlaySound(NinjaTrader.Core.Globals.InstallDir + @"\sounds\Alert1.wav");
+                AppendSignalToCsv(t0, isLong, target2, sig);
+            }
+        }
+
+        // Replay counts as State.Realtime in NT8 (same policy as the sounds above), which
+        // is exactly what the evaluation gate needs; historical backfill must not spam the
+        // CSV with every bar re-processed on load.
+        private void AppendSignalToCsv(DateTime t0, bool isLong, double? target2, TfSignal sig)
+        {
+            string row = TrapMath.BuildCsvRow(t0, isLong, engine.Structure, sig, target2,
+                ImbalanceRatio, TickSize);
+            string path = System.IO.Path.Combine(NinjaTrader.Core.Globals.UserDataDir, "TrapFlow_signals.csv");
+            if (!System.IO.File.Exists(path))
+                System.IO.File.AppendAllText(path, TrapMath.CsvHeader + Environment.NewLine);
+            System.IO.File.AppendAllText(path, row + Environment.NewLine);
         }
 
         private void RenderStatus(CandleLadder c, bool inWindow)

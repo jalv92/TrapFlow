@@ -304,5 +304,42 @@ namespace NinjaTrader.NinjaScript.Indicators
             }
             return CountImbalances(sig, isLong, ratio, tickSize) >= minLevels;
         }
+
+        public const string CsvHeader = "time_et,direction,structure,zone705,zone788,zone886,"
+            + "entry,stop,target1,target2,abs_volume,abs_delta,abs_delta_pct,abs_poc,"
+            + "sig_volume,sig_delta,sig_imbalance_levels";
+
+        public static string BuildCsvRow(DateTime timeEt, bool isLong, StructureVerdict structure,
+            TfSignal s, double? target2, double imbalanceRatio, double tickSize)
+        {
+            var abs = s.AbsorptionCandle;
+            var sig = s.SignalCandle;
+            double absDeltaPct = abs.TotalVolume != 0
+                ? Math.Round(Math.Abs((double)abs.Delta) / abs.TotalVolume, 3)
+                : 0;
+            int sigImbalanceLevels = CountImbalances(sig, isLong, imbalanceRatio, tickSize);
+
+            var fields = new[]
+            {
+                timeEt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
+                isLong ? "LONG" : "SHORT",
+                structure.ToString(),
+                s.Zone705.ToString(CultureInfo.InvariantCulture),
+                s.Zone788.ToString(CultureInfo.InvariantCulture),
+                s.Zone886.ToString(CultureInfo.InvariantCulture),
+                s.Entry.ToString(CultureInfo.InvariantCulture),
+                s.Stop.ToString(CultureInfo.InvariantCulture),
+                s.Target1.ToString(CultureInfo.InvariantCulture),
+                target2.HasValue ? target2.Value.ToString(CultureInfo.InvariantCulture) : "",
+                abs.TotalVolume.ToString(CultureInfo.InvariantCulture),
+                abs.Delta.ToString(CultureInfo.InvariantCulture),
+                absDeltaPct.ToString(CultureInfo.InvariantCulture),
+                abs.Poc.ToString(CultureInfo.InvariantCulture),
+                sig.TotalVolume.ToString(CultureInfo.InvariantCulture),
+                sig.Delta.ToString(CultureInfo.InvariantCulture),
+                sigImbalanceLevels.ToString(CultureInfo.InvariantCulture),
+            };
+            return string.Join(",", fields);
+        }
     }
 }
