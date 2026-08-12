@@ -14,8 +14,7 @@
   <a href="#install">Install</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#evaluation-gate">Evaluation gate</a> ·
-  <a href="#parameters">Parameters</a> ·
-  <a href="#license">License</a>
+  <a href="#parameters">Parameters</a>
 </p>
 
 <p>
@@ -26,10 +25,18 @@
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="">
 </p>
 
-> **Screenshots pending.** TrapFlow needs a live or Market Replay MNQ chart in NinjaTrader 8
-> to produce anything worth showing — a zone box, an absorption marker, a signal arrow. Those
-> only exist once the Replay evaluation (below) is under way. This section will carry a chart
-> screenshot with a real signal on it once that happens; nothing is faked here in the meantime.
+<img src="docs/assets/hero.png" width="100%" alt="TrapFlow — MNQ 5-minute Market Replay chart with a trap zone box, signal arrow, and stop/target lines">
+
+> **Screenshots pending — nothing above is a stand-in.** TrapFlow needs a live or Market
+> Replay MNQ chart in NinjaTrader 8 to produce anything worth showing, and that only happens
+> once the Replay evaluation (below) is under way. Needed in `docs/assets/`:
+> - `hero.png` — MNQ 5-min Replay chart with a trap zone box, a signal arrow, and the
+>   stop/target lines all visible.
+> - `absorption.png` — a zoomed absorption pre-alert marker with the state label in frame.
+> - `properties.png` — the indicator's Properties panel showing the frozen defaults.
+>
+> Capture from **Windows NT8, not WSL** (this repo's tooling has no GUI access to NT8), at
+> ≥1440px wide and **devicePixelRatio 2** — WSL reports 1 and the captures come out soft.
 
 </div>
 
@@ -79,9 +86,9 @@ on MNQ.
 Full state machine, thresholds, and rationale: [`docs/specs/2026-08-11-trapflow-design.md`](docs/specs/2026-08-11-trapflow-design.md).
 Short version — long side described, short is the exact mirror:
 
-1. **Structure** — at each session start, compare POC/VAL across the last 3 completed RTH
-   sessions. Both strictly rising → long armed. Both strictly falling → short armed. Anything
-   else → dormant.
+1. **Structure** — at each session start, compare the last 3 completed RTH sessions' volume
+   profiles. **POC & VAL** strictly rising across all 3 → long armed. **POC & VAH** strictly
+   falling across all 3 → short armed. Anything else → dormant.
 2. **Zone** — the most recent swing leg in the structure direction, fib-retraced at
    0.705 / 0.788 / 0.886. Only drawn if the whole zone sits outside the developing session's
    value area.
@@ -94,6 +101,8 @@ Short version — long side described, short is the exact mirror:
    targets, sound, CSV row.
 6. **Invalidation** — a close beyond the 0.886 level kills the zone; back to looking for a
    new one.
+
+<img src="docs/assets/absorption.png" width="100%" alt="Absorption pre-alert marker with the state label in frame">
 
 ## Evaluation gate
 
@@ -128,6 +137,8 @@ has run.
 | Structure Sessions | 3 | RTH sessions compared for the structure verdict |
 | Window Start / End (ET) | 0930 / 1100 | Time-of-day filter for arming a zone |
 | Fib levels | 0.705 / 0.788 / 0.886 | Zone boundaries and invalidation level (fixed, not exposed) |
+
+<img src="docs/assets/properties.png" width="100%" alt="TrapFlow Properties panel showing the frozen parameter defaults">
 
 ## Limits
 
