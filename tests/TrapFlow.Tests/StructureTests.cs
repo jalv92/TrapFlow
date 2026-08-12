@@ -1,4 +1,4 @@
-using NinjaTrader.NinjaScript.Indicators;
+using TrapFlowCore;
 using Xunit;
 
 public class StructureTests

@@ -1,11 +1,13 @@
 // TrapFlow.cs — NT8 indicator shell: volumetric ladder plumbing, session profiles,
 // structure, and swing-leg wiring around TrapFlowCore's pure logic (TrapFlowEngine).
 //
-// Lives in the Indicators namespace (same as TrapFlowCore.cs) so both files deploy
-// together to Custom/Indicators and TrapFlowCore's types resolve without cross-file
-// usings. The per-file nt8c PostToolUse hook cannot see TrapFlowCore.cs and WILL flag
-// false CS0246/CS0234 on VolumeProfile/CandleLadder/TrapFlowEngine/etc — that is
-// expected; the real gate is the staged multi-file build (see task-7 report).
+// TrapFlowCore.cs lives in its own `TrapFlowCore` namespace (imported below), NOT in
+// Indicators: bin/Custom compiles every file into one assembly and NT8's shipped
+// @VolumeProfile.cs already defines Indicators.VolumeProfile (CS0101 on real F5).
+// VolumeProfile refs below stay fully qualified because the NT8 one in the enclosing
+// Indicators namespace shadows the using. The per-file nt8c PostToolUse hook cannot
+// see TrapFlowCore.cs and WILL flag false CS0246/CS0234 on its types — expected; the
+// real gate is a staged build that includes the NT8-shipped Custom sources.
 //
 // Architecture: the chart's primary series can be anything (any bar type); this
 // indicator adds its own 5-min Volumetric series via AddVolumetric() (BarsInProgress
@@ -24,6 +26,7 @@ using NinjaTrader.Gui; // DashStyleHelper lives here, not in DrawingTools
 using NinjaTrader.NinjaScript;
 using NinjaTrader.NinjaScript.BarsTypes;
 using NinjaTrader.NinjaScript.DrawingTools;
+using TrapFlowCore;
 
 namespace NinjaTrader.NinjaScript.Indicators
 {
@@ -31,8 +34,8 @@ namespace NinjaTrader.NinjaScript.Indicators
     {
         // ---- Engine + profiles -----------------------------------------------------
         private TrapFlowEngine engine;
-        private VolumeProfile developingEth;                // resets at 18:00 ET
-        private VolumeProfile currentRth;                   // accumulates 09:30-16:00 ET
+        private TrapFlowCore.VolumeProfile developingEth;   // resets at 18:00 ET
+        private TrapFlowCore.VolumeProfile currentRth;      // accumulates 09:30-16:00 ET
         private readonly List<double[]> rthHistory = new List<double[]>(); // {poc,vah,val}, oldest first
         private Swing swing;
 
@@ -166,8 +169,8 @@ namespace NinjaTrader.NinjaScript.Indicators
                 // explicitly so the engine starts genuinely dormant until 3 RTH sessions arm it.
                 engine.SetStructure(StructureVerdict.Lateral);
 
-                developingEth = new VolumeProfile();
-                currentRth = new VolumeProfile();
+                developingEth = new TrapFlowCore.VolumeProfile();
+                currentRth = new TrapFlowCore.VolumeProfile();
                 rthHistory.Clear();
 
                 // F4: real bar extremes, not closes -- Swing(ISeries<double> input, strength)
@@ -272,7 +275,7 @@ namespace NinjaTrader.NinjaScript.Indicators
         {
             if (et.TimeOfDay >= EthResetEt && et.Date != currentEthDate)
             {
-                developingEth = new VolumeProfile();
+                developingEth = new TrapFlowCore.VolumeProfile();
                 currentEthDate = et.Date;
             }
             foreach (var row in ladder.Rows)
@@ -295,7 +298,7 @@ namespace NinjaTrader.NinjaScript.Indicators
                     while (rthHistory.Count > StructureSessions)
                         rthHistory.RemoveAt(0);
                 }
-                currentRth = new VolumeProfile();
+                currentRth = new TrapFlowCore.VolumeProfile();
             }
 
             if (et.TimeOfDay >= RthStartEt && et.Date != structureDate)

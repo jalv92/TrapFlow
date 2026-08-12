@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using NinjaTrader.NinjaScript.Indicators;
+using TrapFlowCore;
 using Xunit;
 
 public static class Mk

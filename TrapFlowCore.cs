@@ -6,7 +6,10 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 
-namespace NinjaTrader.NinjaScript.Indicators
+// Own namespace, NOT NinjaTrader.NinjaScript.Indicators: that namespace is shared by
+// every NT8-shipped source in bin/Custom (e.g. @VolumeProfile.cs already defines
+// Indicators.VolumeProfile → CS0101) and by any third-party indicator the user installs.
+namespace TrapFlowCore
 {
     public enum StructureVerdict { ValueUp, ValueDown, Lateral }
 
