@@ -9,17 +9,21 @@
 //
 // Architecture: the chart's primary series can be anything (any bar type); this
 // indicator adds its own 5-min Volumetric series via AddVolumetric() (BarsInProgress
-// == 1) and does ALL of its work off that series only. No drawing here (Task 8);
-// Print() diagnostics only, fired on TrapFlowEngine state events and once-per-day
-// structure re-evaluation.
+// == 1) and does ALL of its work off that series only. Rendering (Task 8) uses the
+// DateTime-anchored Draw.* overloads throughout — never the barsAgo overloads — since
+// barsAgo is relative to whichever BarsInProgress is active and this indicator always
+// runs on series 1 (volumetric) while the chart's primary series can be any bar type.
 using System;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Collections.Generic;
+using System.Windows.Media;
 using NinjaTrader.Cbi;
 using NinjaTrader.Data;
+using NinjaTrader.Gui; // DashStyleHelper lives here, not in DrawingTools
 using NinjaTrader.NinjaScript;
 using NinjaTrader.NinjaScript.BarsTypes;
+using NinjaTrader.NinjaScript.DrawingTools;
 
 namespace NinjaTrader.NinjaScript.Indicators
 {
@@ -31,6 +35,25 @@ namespace NinjaTrader.NinjaScript.Indicators
         private VolumeProfile currentRth;                   // accumulates 09:30-16:00 ET
         private readonly List<double[]> rthHistory = new List<double[]>(); // {poc,vah,val}, oldest first
         private Swing swing;
+
+        // ---- Rendering state (Task 8) -----------------------------------------------
+        // One zone live at a time (mirrors engine.Zone being a single object): the box is
+        // redrawn every bar with its right edge pinned to the current bar, so it grows in
+        // place instead of needing a far-future placeholder end time.
+        private class ZoneBox
+        {
+            public string Tag;
+            public double Upper, Lower;
+            public DateTime CreatedTime;
+            public Brush Fill;
+        }
+        private ZoneBox activeZone;
+        private int zoneCounter, signalCounter, preAlertCounter;
+
+        // ponytail: fixed forward window for the one-shot stop/target lines instead of
+        // redrawing them every bar to track price — they mark a static trade plan, not a
+        // moving zone. Matches the fixed 5-min AddVolumetric() period from Configure.
+        private static readonly TimeSpan SignalLineLookahead = TimeSpan.FromMinutes(100);
 
         // ---- Swing-leg tracking (most recent CONFIRMED high/low on the vol series) --
         private double lastSwingHigh = -1, lastSwingLow = -1;
@@ -154,6 +177,9 @@ namespace NinjaTrader.NinjaScript.Indicators
                 structureDate = DateTime.MinValue;
                 lastSwingHigh = -1; lastSwingLow = -1;
                 lastSwingHighBar = -1; lastSwingLowBar = -1;
+
+                activeZone = null;
+                zoneCounter = 0; signalCounter = 0; preAlertCounter = 0;
             }
         }
 
@@ -174,8 +200,26 @@ namespace NinjaTrader.NinjaScript.Indicators
 
             bool inWindow = InEtWindow(et);
             var evt = engine.OnCandleClose(ladder, inWindow);
-            if (evt.Type != TfEventType.None)
-                Print(string.Format("{0} {1:yyyy-MM-dd HH:mm} ET {2}", Name, et, evt.Type));
+
+            // ZoneInvalidated gets a one-shot gray redraw instead of the normal green/red
+            // extension; every other outcome (including Signal, which still wants the box
+            // to reach the signal bar before it freezes) extends the box as usual.
+            if (evt.Type == TfEventType.ZoneInvalidated)
+                RenderZoneInvalidated();
+            else
+                ExtendActiveZone();
+
+            if (evt.Type == TfEventType.PreAlert)
+            {
+                RenderPreAlert(ladder);
+            }
+            else if (evt.Type == TfEventType.Signal)
+            {
+                RenderSignal(evt);
+                activeZone = null; // setup consumed (Core resets Zone too) -- box stops growing
+            }
+
+            RenderStatus(ladder, inWindow);
         }
 
         private CandleLadder ExtractLadder(VolumetricBarsType volBars, int idx)
@@ -306,8 +350,8 @@ namespace NinjaTrader.NinjaScript.Indicators
             if (highPrice <= lowPrice) return; // degenerate leg guard (Task 3 carry-over)
             developingEth.Compute();
             var evt = engine.OnSwingLeg(lowPrice, highPrice, developingEth.Val, developingEth.Vah);
-            if (evt != TfEventType.None)
-                Print(string.Format("{0} swing leg {1}-{2} -> {3}", Name, lowPrice, highPrice, evt));
+            if (evt == TfEventType.ZoneBuilt)
+                RenderZoneBuilt();
         }
 
         private bool InEtWindow(DateTime et)
@@ -324,6 +368,105 @@ namespace NinjaTrader.NinjaScript.Indicators
         private static DateTime ToEt(DateTime barTime)
         {
             return TimeZoneInfo.ConvertTime(barTime, TimeZoneInfo.Local, TzEt);
+        }
+
+        // ---- Rendering (Task 8) ------------------------------------------------------
+        // All Draw.* calls below anchor on Times[1][0] (DateTime), never barsAgo: this
+        // indicator only ever runs on BarsInProgress == 1 (the volumetric series), and
+        // barsAgo is series-relative, so it would misalign against the chart's primary
+        // series whenever that series isn't also 5-min bars.
+
+        // Called from FeedSwingLeg right after engine.OnSwingLeg() returns ZoneBuilt, so
+        // engine.Zone still reflects the just-built zone.
+        private void RenderZoneBuilt()
+        {
+            var z = engine.Zone;
+            zoneCounter++;
+            DateTime now = Times[1][0];
+            Brush fill = z.IsLong ? Brushes.LimeGreen : Brushes.Red;
+            activeZone = new ZoneBox
+            {
+                Tag = "tfZone" + zoneCounter,
+                Upper = z.UpperEdge,
+                Lower = z.LowerEdge,
+                CreatedTime = now,
+                Fill = fill
+            };
+            Draw.Rectangle(this, activeZone.Tag, false, activeZone.CreatedTime, activeZone.Upper,
+                now, activeZone.Lower, fill, fill, 20);
+        }
+
+        // Redraws the live zone box every bar with its right edge pinned to the current
+        // bar (same "extend by reusing the tag" idiom as FVGFlow/PullbackZone in this
+        // workspace) so it grows in place instead of a needing a far-future placeholder.
+        private void ExtendActiveZone()
+        {
+            if (activeZone == null) return;
+            Draw.Rectangle(this, activeZone.Tag, false, activeZone.CreatedTime, activeZone.Upper,
+                Times[1][0], activeZone.Lower, activeZone.Fill, activeZone.Fill, 20);
+        }
+
+        // One-shot gray redraw, then stop tracking it -- the box freezes at this bar
+        // instead of continuing to extend right.
+        private void RenderZoneInvalidated()
+        {
+            if (activeZone == null) return;
+            Draw.Rectangle(this, activeZone.Tag, false, activeZone.CreatedTime, activeZone.Upper,
+                Times[1][0], activeZone.Lower, Brushes.Gray, Brushes.Gray, 20);
+            activeZone = null;
+        }
+
+        private void RenderPreAlert(CandleLadder c)
+        {
+            bool isLong = engine.Structure == StructureVerdict.ValueUp;
+            double y = isLong ? c.Low : c.High;
+            preAlertCounter++;
+            Draw.Dot(this, "tfPreAlert" + preAlertCounter, false, Times[1][0], y, Brushes.Yellow);
+            if (State == State.Realtime)
+                PlaySound(NinjaTrader.Core.Globals.InstallDir + @"\sounds\Alert2.wav");
+        }
+
+        private void RenderSignal(TfSignal sig)
+        {
+            signalCounter++;
+            DateTime t0 = Times[1][0];
+            DateTime t1 = t0 + SignalLineLookahead;
+            bool isLong = engine.Structure == StructureVerdict.ValueUp;
+
+            string triTag = "tfSignal" + signalCounter;
+            double triY = isLong ? sig.SignalCandle.Low - 4 * TickSize : sig.SignalCandle.High + 4 * TickSize;
+            if (isLong)
+                Draw.TriangleUp(this, triTag, false, t0, triY, Brushes.Lime);
+            else
+                Draw.TriangleDown(this, triTag, false, t0, triY, Brushes.Red);
+
+            Draw.Line(this, "tfStop" + signalCounter, false, t0, sig.Stop, t1, sig.Stop,
+                Brushes.OrangeRed, DashStyleHelper.Dash, 2);
+            Draw.Line(this, "tfTarget1" + signalCounter, false, t0, sig.Target1, t1, sig.Target1,
+                Brushes.DeepSkyBlue, DashStyleHelper.Dash, 2);
+
+            // Hot-path discipline: Compute() walks the whole developing-session profile,
+            // so it only runs here, at the moment a signal actually fires -- never per bar.
+            developingEth.Compute();
+            double poc = developingEth.Poc;
+            double lo = Math.Min(sig.Entry, sig.Target1);
+            double hi = Math.Max(sig.Entry, sig.Target1);
+            if (poc > lo && poc < hi)
+                Draw.Line(this, "tfTarget2" + signalCounter, false, t0, poc, t1, poc,
+                    Brushes.Gold, DashStyleHelper.Dash, 2);
+
+            if (State == State.Realtime)
+                PlaySound(NinjaTrader.Core.Globals.InstallDir + @"\sounds\Alert1.wav");
+        }
+
+        private void RenderStatus(CandleLadder c, bool inWindow)
+        {
+            string text = string.Format(
+                "TrapFlow\nStructure: {0}\nState: {1}\nVolume: {2}\nWindow: {3}",
+                engine.Structure, engine.State,
+                c.TotalVolume >= VolumeThreshold ? "OK" : "KO",
+                inWindow ? "OK" : "KO");
+            Draw.TextFixed(this, "tfStatus", text, TextPosition.TopRight);
         }
     }
 }
